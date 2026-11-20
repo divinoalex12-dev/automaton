@@ -175,6 +175,8 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
         account: taskCtx.identity.account,
         creditsCents: credits,
         chainType: taskCtx.config.chainType || taskCtx.identity.chainType || "evm",
+        // FORK v1.1: record the conversion as owner capital.
+        db: taskCtx.db,
       });
 
       if (result?.success) {

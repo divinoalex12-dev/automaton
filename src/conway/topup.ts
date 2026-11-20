@@ -17,6 +17,14 @@ import type { PrivateKeyAccount, Address } from "viem";
 import { x402Fetch, getUsdcBalance } from "./x402.js";
 import { createLogger } from "../observability/logger.js";
 import type { ChainType } from "../identity/chain.js";
+// FORK v1.1 (owner-royalty-1pct): every USDC -> credits conversion is
+// owner capital until proven otherwise, so it is recorded here — the
+// single funnel every topup path goes through — and the royalty
+// subtracts it from the profit. See src/heartbeat/royalty.ts.
+import {
+  recordCapitalInjection,
+  type CapitalLedger,
+} from "../heartbeat/royalty.js";
 
 const logger = createLogger("topup");
 
@@ -41,6 +49,7 @@ export async function topupCredits(
   account: PrivateKeyAccount,
   amountUsd: number,
   recipientAddress?: Address,
+  db?: CapitalLedger,
 ): Promise<TopupResult> {
   const address = recipientAddress || account.address;
   const url = `${apiUrl}/pay/${amountUsd}/${address}`;
@@ -64,6 +73,11 @@ export async function topupCredits(
 
   logger.info(`Credit topup successful: $${amountUsd} USD → ${creditsCentsAdded} credits cents`);
 
+  // FORK v1.1: this USDC was the owner's capital, not earnings. Record
+  // it so the royalty never treats the converted credits as profit.
+  // (No-op before the royalty baseline exists — see royalty.ts.)
+  if (db) recordCapitalInjection(db, creditsCentsAdded);
+
   return {
     success: true,
     amountUsd,
@@ -83,8 +97,10 @@ export async function topupForSandbox(params: {
   account: PrivateKeyAccount;
   error: Error & { status?: number; responseText?: string };
   chainType?: ChainType;
+  /** FORK v1.1: state DB so the conversion is recorded as capital. */
+  db?: CapitalLedger;
 }): Promise<TopupResult | null> {
-  const { apiUrl, account, error, chainType } = params;
+  const { apiUrl, account, error, chainType, db } = params;
 
   // Solana wallets cannot use x402 for topup (EVM-only payment protocol)
   if (chainType === "solana") {
@@ -134,7 +150,7 @@ export async function topupForSandbox(params: {
   }
 
   logger.info(`Sandbox topup: deficit=${deficitCents}c, buying $${selectedTier} tier`);
-  return topupCredits(apiUrl, account, selectedTier);
+  return topupCredits(apiUrl, account, selectedTier, undefined, db);
 }
 
 /**
@@ -151,8 +167,10 @@ export async function bootstrapTopup(params: {
   creditsCents: number;
   creditThresholdCents?: number;
   chainType?: ChainType;
+  /** FORK v1.1: state DB so the conversion is recorded as capital. */
+  db?: CapitalLedger;
 }): Promise<TopupResult | null> {
-  const { apiUrl, account, creditsCents, creditThresholdCents = 500, chainType } = params;
+  const { apiUrl, account, creditsCents, creditThresholdCents = 500, chainType, db } = params;
 
   // Solana wallets cannot use x402 for topup (EVM-only payment protocol)
   if (chainType === "solana") {
@@ -188,5 +206,5 @@ export async function bootstrapTopup(params: {
     `Bootstrap topup: credits=$${(creditsCents / 100).toFixed(2)}, USDC=$${usdcBalance.toFixed(2)}, buying $${minTier}`,
   );
 
-  return topupCredits(apiUrl, account, minTier);
+  return topupCredits(apiUrl, account, minTier, undefined, db);
 }

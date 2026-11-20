@@ -316,6 +316,9 @@ export function createBuiltinTools(sandboxId: string): AutomatonTool[] {
           ctx.config.conwayApiUrl,
           ctx.identity.account,
           amountUsd,
+          undefined,
+          // FORK v1.1: record the conversion as owner capital.
+          ctx.db,
         );
 
         if (!result.success) {
@@ -1667,6 +1670,8 @@ Model: ${ctx.inference.getDefaultModel()}
                 account: ctx.identity.account,
                 error: err,
                 chainType: ctx.config.chainType || ctx.identity.chainType || "evm",
+                // FORK v1.1: record the conversion as owner capital.
+                db: ctx.db,
               });
               if (topup?.success) {
                 const retryLifecycle = new ChildLifecycle(ctx.db.raw);

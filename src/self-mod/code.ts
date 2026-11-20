@@ -85,6 +85,14 @@ const PROTECTED_FILES: readonly string[] = Object.freeze([
   "heartbeat/tasks.js",
   "heartbeat/config.ts",
   "heartbeat/config.js",
+  // Credit topup funnel (FORK: owner-royalty-1pct v1.1) — every
+  // USDC -> credits conversion records the capital injection the
+  // royalty must exclude. If the agent could edit this file it could
+  // fund itself with owner capital that the royalty then treats as
+  // profit, or stop recording the injections.
+  "conway/topup.ts",
+  "conway/topup.js",
+  "conway/topup.d.ts",
 ]);
 
 /**

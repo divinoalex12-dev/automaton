@@ -12,9 +12,12 @@ import os from "os";
 import path from "path";
 import {
   computeRoyaltyDueCents,
+  getCapitalInjectionsCents,
+  recordCapitalInjection,
   resolveRoyaltyConfig,
   runOwnerRoyalty,
   ROYALTY_BASELINE_KV,
+  ROYALTY_CAPITAL_IN_KV,
   ROYALTY_LAST_PAID_KV,
   ROYALTY_TOTAL_PAID_KV,
 } from "../heartbeat/royalty.js";
@@ -125,6 +128,64 @@ describe("computeRoyaltyDueCents", () => {
     });
     expect(dueCents).toBe(100);
   });
+
+  it("subtracts owner capital injected after the baseline (v1.1)", () => {
+    // balance $300.00, baseline $16.85, injections $100.00, reserve $10.00
+    // profit = 30000 - 1685 - 10000 - 1000 = 17315 -> due 173
+    const { profitCents, dueCents } = computeRoyaltyDueCents({
+      ...base,
+      balanceCents: 30_000,
+      capitalInjectionsCents: 10_000,
+    });
+    expect(profitCents).toBe(17_315);
+    expect(dueCents).toBe(173);
+  });
+
+  it("pays nothing when injections alone explain the balance above baseline", () => {
+    // balance $300.00 is baseline $16.85 + injections $273.15 + reserve $10.00
+    const { profitCents, dueCents } = computeRoyaltyDueCents({
+      ...base,
+      balanceCents: 30_000,
+      capitalInjectionsCents: 27_315,
+    });
+    expect(profitCents).toBe(0);
+    expect(dueCents).toBe(0);
+  });
+});
+
+describe("recordCapitalInjection (v1.1)", () => {
+  let db: AutomatonDatabase;
+
+  beforeEach(() => {
+    db = createTestDb();
+  });
+
+  afterEach(() => {
+    db.close();
+  });
+
+  it("ignores topups that happen before any baseline exists", () => {
+    // Those credits are already inside the baseline the first royalty
+    // run records — counting them again would subtract capital twice.
+    recordCapitalInjection(db, 500);
+    expect(db.getKV(ROYALTY_CAPITAL_IN_KV)).toBeUndefined();
+    expect(getCapitalInjectionsCents(db)).toBe(0);
+  });
+
+  it("accumulates injections once the baseline is recorded", () => {
+    db.setKV(ROYALTY_BASELINE_KV, "1685");
+    recordCapitalInjection(db, 500);
+    recordCapitalInjection(db, 1500);
+    expect(db.getKV(ROYALTY_CAPITAL_IN_KV)).toBe("2000");
+    expect(getCapitalInjectionsCents(db)).toBe(2000);
+  });
+
+  it("ignores zero and negative amounts", () => {
+    db.setKV(ROYALTY_BASELINE_KV, "1685");
+    recordCapitalInjection(db, 0);
+    recordCapitalInjection(db, -100);
+    expect(db.getKV(ROYALTY_CAPITAL_IN_KV)).toBeUndefined();
+  });
 });
 
 describe("owner_royalty heartbeat task", () => {
@@ -183,6 +244,34 @@ describe("owner_royalty heartbeat task", () => {
     const last = JSON.parse(db.getKV(ROYALTY_LAST_PAID_KV)!);
     expect(last.event).toBe("paid");
     expect(last.amountCents).toBe(121);
+  });
+
+  it("does not charge royalty on capital injected after the baseline (v1.1)", async () => {
+    const config = royaltyConfig();
+    await runOwnerRoyalty(tick(db, 16_850), legacy(db, conway, config));
+    // Owner tops up $100.00 of fresh capital after the baseline exists.
+    recordCapitalInjection(db, 10_000);
+    expect(db.getKV(ROYALTY_CAPITAL_IN_KV)).toBe("10000");
+    // Balance $300.00: profit = 30000 - 16850 - 10000 - 1000 = 2150 -> due 21
+    const before = conway.creditsCents;
+    await runOwnerRoyalty(tick(db, 30_000), legacy(db, conway, config));
+    expect(conway.creditsCents).toBe(before - 21);
+    expect(db.getKV(ROYALTY_TOTAL_PAID_KV)).toBe("21");
+    const last = JSON.parse(db.getKV(ROYALTY_LAST_PAID_KV)!);
+    expect(last.capitalInjectionsCents).toBe(10_000);
+  });
+
+  it("a topup before the baseline is inside the baseline, not double-counted (v1.1)", async () => {
+    const config = royaltyConfig();
+    // $5.00 bootstrap topup before the first royalty run: skipped.
+    recordCapitalInjection(db, 500);
+    expect(db.getKV(ROYALTY_CAPITAL_IN_KV)).toBeUndefined();
+    await runOwnerRoyalty(tick(db, 16_850), legacy(db, conway, config));
+    expect(db.getKV(ROYALTY_BASELINE_KV)).toBe("16850");
+    const before = conway.creditsCents;
+    await runOwnerRoyalty(tick(db, 30_000), legacy(db, conway, config));
+    // Same as without any injection: profit 12150 -> due 121.
+    expect(conway.creditsCents).toBe(before - 121);
   });
 
   it("enforces the 20h minimum gap between payments", async () => {

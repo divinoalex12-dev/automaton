@@ -352,6 +352,8 @@ async function run(): Promise<void> {
             account,
             creditsCents,
             chainType: resolvedChainType,
+            // FORK v1.1: record the conversion as owner capital.
+            db,
           });
           if (topupResult?.success) {
             logger.info(

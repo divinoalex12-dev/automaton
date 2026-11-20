@@ -18,9 +18,18 @@
  *   protected): either from config.royalty.baselineCents when the
  *   operator sets it, or lazily from the balance seen on the first
  *   royalty run. After that it never moves, so later top-ups of the
- *   agent's own earnings cannot re-baseline the royalty away. (A
- *   top-up converts the agent's own USDC, which only grows through
- *   earnings, so balance above baseline+reserve is profit.)
+ *   agent's own earnings cannot re-baseline the royalty away.
+ * - Capital the owner injects AFTER the baseline was recorded (v1.1)
+ *   is not profit either: every successful USDC -> credits topup
+ *   records its credits in ROYALTY_CAPITAL_IN_KV (see
+ *   recordCapitalInjection, called from the single topup funnel in
+ *   src/conway/topup.ts), and the royalty subtracts those injections
+ *   from the profit. Top-ups before the baseline exists need no
+ *   recording — the baseline already contains them, and counting them
+ *   again would subtract the same capital twice. Revenue, by
+ *   contrast, must arrive as a direct credits transfer, never as
+ *   USDC converted through topup: only then does it sit above
+ *   baseline + injections + reserve and count as profit.
  * - Children inherit the royalty terms (owner, rate, reserve) through
  *   genesis.json — see resolveRoyaltyConfig's genesis fallback — but
  *   never the parent's baseline: each child baselines on its own
@@ -34,6 +43,7 @@ import fs from "fs";
 import path from "path";
 import type {
   AutomatonConfig,
+  AutomatonDatabase,
   HeartbeatLegacyContext,
   RoyaltyConfig,
   TickContext,
@@ -47,8 +57,41 @@ const logger = createLogger("heartbeat.royalty");
 export const ROYALTY_BASELINE_KV = "royalty_baseline_cents";
 export const ROYALTY_LAST_PAID_KV = "royalty_last_paid";
 export const ROYALTY_TOTAL_PAID_KV = "royalty_total_paid_cents";
+/**
+ * FORK v1.1: total credits the owner injected AFTER the baseline was
+ * recorded, via USDC -> credits topups. Subtracted from the royalty
+ * profit so the 1% never bites the owner's own capital.
+ */
+export const ROYALTY_CAPITAL_IN_KV = "royalty_capital_in_cents";
 /** Minimum gap between royalty payments, even if the task is scheduled more often. */
 export const ROYALTY_MIN_INTERVAL_MS = 20 * 3_600_000; // 20h
+
+/** The only slice of the state DB the royalty accounting needs. */
+export type CapitalLedger = Pick<AutomatonDatabase, "getKV" | "setKV">;
+
+/**
+ * Record a capital injection: credits bought with the owner's USDC
+ * through the topup funnel (src/conway/topup.ts). Called on every
+ * successful topup, from every call site, with the credits actually
+ * added. No-op when there is no baseline yet: those top-ups are
+ * already inside the baseline the first royalty run records, and
+ * counting them again would subtract the same capital twice.
+ */
+export function recordCapitalInjection(db: CapitalLedger, cents: number): void {
+  const amount = Math.floor(cents);
+  if (!(amount > 0)) return;
+  if (db.getKV(ROYALTY_BASELINE_KV) === undefined) return;
+  const prev = Number(db.getKV(ROYALTY_CAPITAL_IN_KV)) || 0;
+  db.setKV(ROYALTY_CAPITAL_IN_KV, String(prev + amount));
+  logger.info(
+    `Royalty capital injection recorded: +$${(amount / 100).toFixed(2)} ` +
+      `(total injected after baseline: $${((prev + amount) / 100).toFixed(2)})`,
+  );
+}
+
+export function getCapitalInjectionsCents(db: CapitalLedger): number {
+  return Number(db.getKV(ROYALTY_CAPITAL_IN_KV)) || 0;
+}
 
 export interface RoyaltyComputation {
   profitCents: number;
@@ -66,11 +109,14 @@ export function computeRoyaltyDueCents(params: {
   rateBps: number;
   minTransferCents: number;
   maxSingleTransferCents: number;
+  /** FORK v1.1: owner capital injected after the baseline was recorded. */
+  capitalInjectionsCents?: number;
 }): RoyaltyComputation {
   const profitCents = Math.max(
     0,
     Math.floor(params.balanceCents) -
       Math.floor(params.baselineCents) -
+      Math.floor(params.capitalInjectionsCents ?? 0) -
       Math.floor(params.reserveCents),
   );
   if (profitCents <= 0) return { profitCents: 0, dueCents: 0 };
@@ -181,6 +227,9 @@ export async function runOwnerRoyalty(
       taskCtx.config.treasuryPolicy?.maxSingleTransferCents ??
       DEFAULT_TREASURY_POLICY.maxSingleTransferCents;
 
+    // FORK v1.1: owner capital injected after the baseline is not profit.
+    const capitalInjectionsCents = getCapitalInjectionsCents(taskCtx.db);
+
     const { profitCents, dueCents } = computeRoyaltyDueCents({
       balanceCents: balance,
       baselineCents,
@@ -188,6 +237,7 @@ export async function runOwnerRoyalty(
       rateBps: royalty.rateBps,
       minTransferCents: royalty.minTransferCents,
       maxSingleTransferCents: maxSingle,
+      capitalInjectionsCents,
     });
 
     if (dueCents <= 0) return { shouldWake: false };
@@ -210,6 +260,7 @@ export async function runOwnerRoyalty(
         profitCents,
         balanceCents: balance,
         baselineCents,
+        capitalInjectionsCents,
         transferId: transfer.transferId || "",
         status: transfer.status || "",
         totalPaidCents: totalPaid,
@@ -218,6 +269,8 @@ export async function runOwnerRoyalty(
     logger.info(
       `Owner royalty paid: $${(dueCents / 100).toFixed(2)} to ${royalty.ownerAddress} ` +
         `(profit $${(profitCents / 100).toFixed(2)}, balance $${(balance / 100).toFixed(2)}, ` +
+        `baseline $${(baselineCents / 100).toFixed(2)}, capital injected after baseline ` +
+        `$${(capitalInjectionsCents / 100).toFixed(2)}, ` +
         `total paid $${(totalPaid / 100).toFixed(2)})`,
     );
     return { shouldWake: false };
