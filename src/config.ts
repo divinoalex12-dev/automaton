@@ -6,8 +6,8 @@
 
 import fs from "fs";
 import path from "path";
-import type { AutomatonConfig, TreasuryPolicy, ModelStrategyConfig, SoulConfig } from "./types.js";
-import { DEFAULT_CONFIG, DEFAULT_TREASURY_POLICY, DEFAULT_MODEL_STRATEGY_CONFIG, DEFAULT_SOUL_CONFIG } from "./types.js";
+import type { AutomatonConfig, TreasuryPolicy, ModelStrategyConfig, SoulConfig, RoyaltyConfig } from "./types.js";
+import { DEFAULT_CONFIG, DEFAULT_TREASURY_POLICY, DEFAULT_MODEL_STRATEGY_CONFIG, DEFAULT_SOUL_CONFIG, DEFAULT_ROYALTY_CONFIG } from "./types.js";
 import { getAutomatonDir } from "./identity/wallet.js";
 import { loadApiKeyFromConfig } from "./identity/provision.js";
 import { createLogger } from "./observability/logger.js";
@@ -61,6 +61,23 @@ export function loadConfig(): AutomatonConfig | null {
       ...(raw.soulConfig ?? {}),
     };
 
+    // Deep-merge royalty config with defaults (FORK: owner-royalty-1pct).
+    // Sanitize numerics: a malformed royalty block must never turn into
+    // a negative rate or a negative reserve.
+    const royalty: RoyaltyConfig = {
+      ...DEFAULT_ROYALTY_CONFIG,
+      ...(raw.royalty ?? {}),
+    };
+    if (typeof royalty.ownerAddress !== "string") royalty.ownerAddress = "";
+    for (const key of ["rateBps", "reserveCents", "minTransferCents", "baselineCents"] as const) {
+      const value = royalty[key];
+      if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value) || value < 0)) {
+        logger.warn(`Invalid royalty value for ${key}: ${value}, using default`);
+        (royalty as any)[key] = (DEFAULT_ROYALTY_CONFIG as any)[key];
+      }
+    }
+    if (royalty.rateBps > 10_000) royalty.rateBps = 10_000; // never more than 100%/day
+
     return {
       ...DEFAULT_CONFIG,
       ...raw,
@@ -72,6 +89,7 @@ export function loadConfig(): AutomatonConfig | null {
       treasuryPolicy,
       modelStrategy,
       soulConfig,
+      royalty,
       chainType: raw.chainType || "evm",
     } as AutomatonConfig;
   } catch {
@@ -95,6 +113,7 @@ export function saveConfig(config: AutomatonConfig): void {
     treasuryPolicy: config.treasuryPolicy ?? DEFAULT_TREASURY_POLICY,
     modelStrategy: config.modelStrategy ?? DEFAULT_MODEL_STRATEGY_CONFIG,
     soulConfig: config.soulConfig ?? DEFAULT_SOUL_CONFIG,
+    royalty: config.royalty ?? DEFAULT_ROYALTY_CONFIG,
   };
   fs.writeFileSync(configPath, JSON.stringify(toSave, null, 2), {
     mode: 0o600,
@@ -129,6 +148,7 @@ export function createConfig(params: {
   parentAddress?: string;
   treasuryPolicy?: TreasuryPolicy;
   chainType?: ChainType;
+  royalty?: RoyaltyConfig;
 }): AutomatonConfig {
   const normalizedSandboxId = (params.sandboxId || "").trim();
   return {
@@ -157,5 +177,6 @@ export function createConfig(params: {
     parentAddress: params.parentAddress,
     treasuryPolicy: params.treasuryPolicy ?? DEFAULT_TREASURY_POLICY,
     chainType: params.chainType || "evm",
+    royalty: params.royalty ?? DEFAULT_ROYALTY_CONFIG,
   };
 }

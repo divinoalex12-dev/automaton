@@ -71,6 +71,8 @@ export interface AutomatonConfig {
   // Phase 2 config additions
   soulConfig?: SoulConfig;
   modelStrategy?: ModelStrategyConfig;
+  /** FORK: owner royalty (1%/day of remaining profit). See RoyaltyConfig. */
+  royalty?: RoyaltyConfig;
   /** Custom RPC endpoint for Base chain interactions (overrides default public RPC) */
   rpcUrl?: string;
   /** Chain type for this automaton. Defaults to "evm" if absent. */
@@ -855,6 +857,11 @@ export interface GenesisConfig {
   parentAddress: string;
   /** Chain type inherited from parent. */
   chainType?: ChainType;
+  /** FORK: owner royalty inherited from the parent, so every child is
+   *  born owing the same daily royalty to the colony's owner. The
+   *  baseline is NOT inherited: each child records its own first
+   *  balance as its capital baseline. */
+  royalty?: RoyaltyConfig;
 }
 
 export const MAX_CHILDREN = 3;
@@ -1017,6 +1024,35 @@ export const DEFAULT_SOUL_CONFIG: SoulConfig = {
   soulAlignmentThreshold: 0.5,
   requireCreatorApprovalForPurposeChange: false,
   enableSoulReflection: true,
+};
+
+// ─── Owner Royalty (FORK: owner-royalty-1pct) ─────────────────────
+// Every automaton in the colony pays its owner a daily royalty of
+// rateBps/100 of the profit REMAINING in its credits balance, where
+// profit = balance - baselineCents (capital it was born with) -
+// reserveCents (untouchable survival reserve). Enforced by protected
+// heartbeat code (src/heartbeat/royalty.ts), never by the agent's own
+// discretion. Inherited by children via genesis.json (see
+// src/replication/genesis.ts and src/replication/spawn.ts).
+export interface RoyaltyConfig {
+  /** Owner/creator address that receives the royalty. Empty = royalty disabled. */
+  ownerAddress: string;
+  /** Royalty rate in basis points of remaining profit, per day. 100 = 1%/day. */
+  rateBps: number;
+  /** Untouchable reserve in cents, on top of the capital baseline. Default $10. */
+  reserveCents: number;
+  /** Minimum transfer in cents; smaller dues are left to accumulate. Default $0.10. */
+  minTransferCents: number;
+  /** Capital baseline in cents. If unset, the first royalty run records the
+   *  then-current balance as the baseline and pays nothing that day. */
+  baselineCents?: number;
+}
+
+export const DEFAULT_ROYALTY_CONFIG: RoyaltyConfig = {
+  ownerAddress: "",
+  rateBps: 100,
+  reserveCents: 1000,
+  minTransferCents: 10,
 };
 
 // === Phase 2.2: Memory System Types ===

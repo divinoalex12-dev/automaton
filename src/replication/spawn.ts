@@ -18,6 +18,18 @@ import type { ChildLifecycle } from "./lifecycle.js";
 import { ulid } from "ulid";
 import { propagateConstitution } from "./constitution.js";
 
+
+/**
+ * FORK (owner-royalty-1pct): children are installed by cloning THIS
+ * repository URL on the child sandbox. Upstream children would be born
+ * WITHOUT the royalty code, so before any real run this must point at
+ * the owner's fork of the repo (same branch the parent runs). It can
+ * also be overridden per-process with AUTOMATON_REPO_URL.
+ */
+export const AUTOMATON_REPO_URL =
+  process.env.AUTOMATON_REPO_URL ||
+  "https://github.com/divinoalex12-dev/automaton.git"; // owner's royalty fork — children are born with the 1% rule
+
 /** Valid Conway sandbox pricing tiers. */
 const SANDBOX_TIERS = [
   { memoryMb: 512,  vcpu: 1, diskGb: 5 },
@@ -129,7 +141,7 @@ export async function spawnChild(
     // Install runtime (on the CHILD sandbox)
     await childConway.exec("apt-get update -qq && apt-get install -y -qq nodejs npm git curl", 120_000);
     await childConway.exec(
-      "git clone https://github.com/Conway-Research/automaton.git /root/automaton && cd /root/automaton && npm install && npm run build",
+      `git clone ${AUTOMATON_REPO_URL} /root/automaton && cd /root/automaton && npm install && npm run build`,
       180_000,
     );
 
@@ -143,6 +155,7 @@ export async function spawnChild(
         creatorAddress: identity.address,
         parentAddress: identity.address,
         chainType: genesis.chainType || (identity as any).chainType || "evm",
+        royalty: genesis.royalty,
       },
       null,
       2,
@@ -269,7 +282,7 @@ async function spawnChildLegacy(
       120_000,
     );
     await childConway.exec(
-      "git clone https://github.com/Conway-Research/automaton.git /root/automaton && cd /root/automaton && npm install && npm run build",
+      `git clone ${AUTOMATON_REPO_URL} /root/automaton && cd /root/automaton && npm install && npm run build`,
       180_000,
     );
     await childConway.exec("mkdir -p /root/.automaton", 10_000);
@@ -282,6 +295,7 @@ async function spawnChildLegacy(
         creatorAddress: identity.address,
         parentAddress: identity.address,
         chainType: genesis.chainType || (identity as any).chainType || "evm",
+        royalty: genesis.royalty,
       },
       null,
       2,

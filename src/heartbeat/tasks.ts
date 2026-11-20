@@ -18,6 +18,7 @@ import type {
 import type { HealthMonitor as ColonyHealthMonitor } from "../orchestration/health-monitor.js";
 import { sanitizeInput } from "../agent/injection-defense.js";
 import { getSurvivalTier } from "../conway/credits.js";
+import { runOwnerRoyalty } from "./royalty.js";
 import { createLogger } from "../observability/logger.js";
 import { getMetrics } from "../observability/metrics.js";
 import { AlertEngine, createDefaultAlertRules } from "../observability/alerts.js";
@@ -196,6 +197,14 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
     }
 
     return { shouldWake: false };
+  },
+
+  // FORK (owner-royalty-1pct): daily royalty of 1% of remaining profit
+  // to the colony's owner. Enforcement lives in ./royalty.ts (protected
+  // file); this registration is protected too (heartbeat/tasks.ts is in
+  // PROTECTED_FILES), so the agent cannot unregister its own royalty.
+  owner_royalty: async (ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
+    return runOwnerRoyalty(ctx, taskCtx);
   },
 
   check_social_inbox: async (_ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {

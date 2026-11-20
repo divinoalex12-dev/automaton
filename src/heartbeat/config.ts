@@ -38,6 +38,14 @@ const DEFAULT_HEARTBEAT_CONFIG: HeartbeatConfig = {
       enabled: true,
     },
     {
+      // FORK (owner-royalty-1pct): daily at noon UTC. The task itself
+      // also enforces a 20h minimum gap between payments.
+      name: "owner_royalty",
+      schedule: "0 12 * * *",
+      task: "owner_royalty",
+      enabled: true,
+    },
+    {
       name: "check_for_updates",
       schedule: "0 */4 * * *",
       task: "check_for_updates",

@@ -76,6 +76,15 @@ const PROTECTED_FILES: readonly string[] = Object.freeze([
   "agent/policy-engine.js",
   "agent/policy-rules/index.ts",
   "agent/policy-rules/index.js",
+  // Owner royalty (FORK: owner-royalty-1pct) — the agent must not be
+  // able to edit, unregister, or reschedule its own royalty.
+  "heartbeat/royalty.ts",
+  "heartbeat/royalty.js",
+  "heartbeat/royalty.d.ts",
+  "heartbeat/tasks.ts",
+  "heartbeat/tasks.js",
+  "heartbeat/config.ts",
+  "heartbeat/config.js",
 ]);
 
 /**

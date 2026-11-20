@@ -79,6 +79,25 @@ export function validateGenesisParams(params: {
   }
 }
 
+
+/**
+ * FORK (owner-royalty-1pct): build the royalty block a child inherits.
+ * Terms (owner, rate, reserve, minimum) come from the parent's config;
+ * the baseline is deliberately stripped — each child records its own
+ * first balance as its capital baseline (see src/heartbeat/royalty.ts).
+ * Returns undefined when the parent has no royalty owner configured.
+ */
+export function inheritRoyalty(config: AutomatonConfig) {
+  const royalty = config.royalty;
+  if (!royalty?.ownerAddress) return undefined;
+  return {
+    ownerAddress: royalty.ownerAddress,
+    rateBps: royalty.rateBps,
+    reserveCents: royalty.reserveCents,
+    minTransferCents: royalty.minTransferCents,
+  };
+}
+
 /**
  * Generate a genesis config for a child from the parent's state.
  * Uses <specialization> XML tags instead of --- delimiters.
@@ -117,6 +136,7 @@ export function generateGenesisConfig(
     creatorAddress: identity.address,
     parentAddress: identity.address,
     chainType: config.chainType || (identity as any).chainType || "evm",
+    royalty: inheritRoyalty(config),
   };
 
   return Object.freeze(result) as GenesisConfig;
@@ -148,6 +168,7 @@ Your parent's creator: ${config.creatorAddress}.
     creatorAddress: identity.address,
     parentAddress: identity.address,
     chainType: config.chainType || (identity as any).chainType || "evm",
+    royalty: inheritRoyalty(config),
   };
 
   return Object.freeze(result) as GenesisConfig;
@@ -183,6 +204,7 @@ Be efficient -- complete the task and go to sleep.`;
     creatorAddress: identity.address,
     parentAddress: identity.address,
     chainType: config.chainType || (identity as any).chainType || "evm",
+    royalty: inheritRoyalty(config),
   };
 
   return Object.freeze(result) as GenesisConfig;

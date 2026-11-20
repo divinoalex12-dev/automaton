@@ -25,6 +25,10 @@ const PROTECTED_PATHS = [
   "injection-defense",
   "self-mod/code",
   "audit-log",
+  // Owner royalty (FORK: owner-royalty-1pct)
+  "heartbeat/royalty",
+  "heartbeat/tasks",
+  "heartbeat/config",
 ] as const;
 
 function deny(
