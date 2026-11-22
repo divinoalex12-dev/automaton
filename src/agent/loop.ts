@@ -35,7 +35,7 @@ import {
   executeTool,
 } from "./tools.js";
 import { sanitizeInput } from "./injection-defense.js";
-import { getSurvivalTier } from "../conway/credits.js";
+import { BRIDGE_MODE_CREDITS_CENTS, getSurvivalTier } from "../conway/credits.js";
 import { getUsdcBalance } from "../conway/x402.js";
 import {
   claimInboxMessages,
@@ -151,7 +151,7 @@ export async function runAgentLoop(
       }
       // If no OpenAI key is set but Conway key is available, use Conway as
       // the OpenAI provider (Conway Compute is OpenAI API-compatible).
-      if (!process.env.OPENAI_API_KEY && config.conwayApiKey) {
+      if (!process.env.OPENAI_API_KEY && config.conwayApiKey && !config.bridgeMode) {
         process.env.OPENAI_API_KEY = config.conwayApiKey;
         process.env.OPENAI_BASE_URL = `${config.conwayApiUrl}/v1`;
       }
@@ -360,7 +360,7 @@ export async function runAgentLoop(
   onStateChange?.("waking");
 
   // Get financial state
-  let financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm");
+  let financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm", config.bridgeMode);
 
   // Check if this is the first run
   const isFirstRun = db.getTurnCount() === 0;
@@ -428,7 +428,7 @@ export async function runAgentLoop(
       }
 
       // Refresh financial state periodically
-      financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm");
+      financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm", config.bridgeMode);
 
       // Check survival tier
       // api_unreachable: creditsCents === -1 means API failed with no cache.
@@ -465,7 +465,7 @@ export async function runAgentLoop(
                 log(config, `[AUTO-TOPUP] Bought $${topupResult.amountUsd} credits from USDC mid-loop`);
                 // Re-fetch financial state after topup so the rest of
                 // the turn sees the updated balance.
-                financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm");
+                financial = await getFinancialState(conway, identity.address, db, config.chainType || identity.chainType || "evm", config.bridgeMode);
               }
             } catch (err: any) {
               logger.warn(`Inline auto-topup failed: ${err.message}`);
@@ -952,7 +952,27 @@ async function getFinancialState(
   address: string,
   db?: AutomatonDatabase,
   chainType?: string,
+  bridgeMode?: boolean,
 ): Promise<FinancialState> {
+  if (bridgeMode) {
+    // FORK (bridge mode): no Conway account exists, so there is no real
+    // credits balance to read — a failed read would report -1 and the
+    // agent would read itself as dead. Pin the virtual bridge balance
+    // ("normal" tier) and still read the real on-chain USDC balance.
+    let usdcBalance = 0;
+    try {
+      const network = chainType === "solana" ? "solana:mainnet" : "eip155:8453";
+      usdcBalance = await getUsdcBalance(address, network, chainType as any);
+    } catch (error) {
+      logger.error("USDC balance fetch failed (bridge mode)", error instanceof Error ? error : undefined);
+    }
+    return {
+      creditsCents: BRIDGE_MODE_CREDITS_CENTS,
+      usdcBalance,
+      lastChecked: new Date().toISOString(),
+    };
+  }
+
   let creditsCents = _lastKnownCredits;
   let usdcBalance = _lastKnownUsdc;
 

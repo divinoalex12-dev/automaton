@@ -73,6 +73,15 @@ export interface AutomatonConfig {
   modelStrategy?: ModelStrategyConfig;
   /** FORK: owner royalty (1%/day of remaining profit). See RoyaltyConfig. */
   royalty?: RoyaltyConfig;
+  /**
+   * FORK (bridge mode): run without a Conway account. Compute is paid by
+   * the creator's external inference API key (openaiApiKey/anthropicApiKey),
+   * and the Conway survival economy is suspended: no credits balance is
+   * read, the zero-credits death escalation is disabled, and Conway-bound
+   * heartbeat tasks (owner royalty, topup) are no-ops. Flip to false once
+   * a real Conway API key is provisioned for this automaton's wallet.
+   */
+  bridgeMode?: boolean;
   /** Custom RPC endpoint for Base chain interactions (overrides default public RPC) */
   rpcUrl?: string;
   /** Chain type for this automaton. Defaults to "evm" if absent. */

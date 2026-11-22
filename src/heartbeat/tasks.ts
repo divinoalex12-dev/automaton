@@ -70,7 +70,9 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
     taskCtx.db.setKV("last_heartbeat_ping", JSON.stringify(payload));
 
     // If critical or dead, record a distress signal
-    if (tier === "critical" || tier === "dead") {
+    // FORK (bridge mode): no Conway account exists, so a low tier here only
+    // means the balance fetch failed — never raise a funding distress.
+    if ((tier === "critical" || tier === "dead") && !taskCtx.config.bridgeMode) {
       const distressPayload = {
         level: tier,
         name: taskCtx.config.name,
@@ -111,7 +113,7 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
     // transition to dead. This gives the agent time to receive funding before dying.
     // USDC can't go negative, so dead is only reached via this timeout.
     const DEAD_GRACE_PERIOD_MS = 3_600_000; // 1 hour
-    if (tier === "critical" && credits === 0) {
+    if (tier === "critical" && credits === 0 && !taskCtx.config.bridgeMode) {
       const zeroSince = taskCtx.db.getKV("zero_credits_since");
       if (!zeroSince) {
         // First time seeing zero — start the grace period
@@ -206,6 +208,11 @@ export const BUILTIN_TASKS: Record<string, HeartbeatTaskFn> = {
   // file); this registration is protected too (heartbeat/tasks.ts is in
   // PROTECTED_FILES), so the agent cannot unregister its own royalty.
   owner_royalty: async (ctx: TickContext, taskCtx: HeartbeatLegacyContext) => {
+    // FORK (bridge mode): no Conway account means no real credits balance
+    // and no transfer rail — the royalty is suspended, never computed from
+    // a virtual or failed balance read. It resumes when bridgeMode is off
+    // and a real API key is provisioned.
+    if (taskCtx.config.bridgeMode) return { shouldWake: false };
     return runOwnerRoyalty(ctx, taskCtx);
   },
 

@@ -29,6 +29,15 @@ export async function checkFinancialState(
 }
 
 /**
+ * FORK (bridge mode): virtual credits balance (cents) reported while the
+ * automaton runs without a Conway account. Compute is paid externally by
+ * the creator, so the agent is pinned to a small positive balance — the
+ * "normal" survival tier — instead of reading a Conway balance that does
+ * not exist (a failed read would otherwise report -1/0 and kill it).
+ */
+export const BRIDGE_MODE_CREDITS_CENTS = 100;
+
+/**
  * Determine the survival tier based on current credits.
  * Thresholds are checked in descending order: high > normal > low_compute > critical > dead.
  *

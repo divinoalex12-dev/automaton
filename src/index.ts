@@ -346,6 +346,9 @@ async function run(): Promise<void> {
     try {
       await Promise.race([
         (async () => {
+          // FORK (bridge mode): no Conway account and no USDC conversion
+          // exist yet — skip the bootstrap topup entirely.
+          if (config.bridgeMode) return;
           const creditsCents = await conway.getCreditsBalance().catch(() => 0);
           const topupResult = await bootstrapTopup({
             apiUrl: config.conwayApiUrl,
